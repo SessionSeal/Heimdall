@@ -1,5 +1,5 @@
 /**
- * Heimdall — the MotherTape gateway (Node).
+ * Heimdall — the SessionSeal gateway (Node).
  *
  * Two intake flows:
  *   NEW (S3-shaped): POST /records/draft  -> DRAFT record + asset rows +
@@ -42,7 +42,7 @@ const SQS_URL = process.env.SQS_SEAL_QUEUE_URL || null;
 const AWS_REGION = process.env.AWS_REGION || "ap-south-1";
 const ASSETS_BUCKET = process.env.S3_ASSETS_BUCKET || null;
 const LOCAL_BUCKET = "_localstore";
-const POC_USER_EMAIL = "poc@mothertape.local";
+const POC_USER_EMAIL = "poc@sessionseal.local";
 
 const KIND_EXT = { MASTER: null, STEM: null, PROJECT: ".zip" }; // null = keep upload's ext
 

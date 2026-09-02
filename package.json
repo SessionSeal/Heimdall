@@ -1,8 +1,8 @@
 {
-  "name": "mothertape-heimdall",
+  "name": "sessionseal-heimdall",
   "version": "0.1.0",
   "private": true,
-  "description": "MotherTape gateway: register intake, job status, release downloads, Odin proxy",
+  "description": "SessionSeal gateway: register intake, job status, release downloads, Odin proxy",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
