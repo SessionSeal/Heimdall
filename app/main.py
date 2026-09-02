@@ -14,11 +14,13 @@ Responsibilities today:
 
 import asyncio
 import io
+import json
 import os
 import uuid
 import zipfile
 from pathlib import Path
 
+import boto3
 import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -36,6 +38,23 @@ STORAGE_DIR = Path(os.environ.get(
 UPLOADS = STORAGE_DIR / "uploads"
 RELEASE = STORAGE_DIR / "release"
 SEAL_TIMEOUT_S = int(os.environ.get("SEAL_TIMEOUT_S", "900"))
+
+# SQS is the delivery nudge; the jobs table is the truth. A failed send
+# must never fail intake — thor's fallback DB poll picks the job up.
+SQS_URL = os.environ.get("SQS_SEAL_QUEUE_URL")
+_sqs = (boto3.client("sqs", region_name=os.environ.get("AWS_REGION", "ap-south-1"))
+        if SQS_URL else None)
+
+
+def _nudge_thor(record_id: str) -> None:
+    if _sqs is None:
+        return
+    try:
+        _sqs.send_message(QueueUrl=SQS_URL,
+                          MessageBody=json.dumps({"kind": "SEAL",
+                                                  "record_id": record_id}))
+    except Exception as e:
+        print(f"[heimdall] sqs nudge failed (thor will poll): {e}", flush=True)
 
 app = FastAPI(title="MotherTape Heimdall (gateway)")
 
@@ -106,6 +125,7 @@ async def product_register(
         "stem_paths": stem_paths,
         "project_zip_path": str(project_path),
     })
+    _nudge_thor(record_id)
 
     # Synchronous facade: wait for thor. The wizard's polling upgrade
     # (GET /records/{id}) replaces this wait in a later step.
