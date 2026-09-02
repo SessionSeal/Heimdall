@@ -1,8 +1,0 @@
-fastapi
-uvicorn
-python-multipart
-httpx
-psycopg[binary,pool]
-python-dotenv
-numpy
-boto3
