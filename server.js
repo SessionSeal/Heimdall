@@ -30,6 +30,7 @@ const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
 const { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } =
   require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const { decode } = require("@auth/core/jwt");
 
 const PORT = parseInt(process.env.PORT || "8000", 10);
 const PUBLIC_URL = process.env.HEIMDALL_PUBLIC_URL || `http://127.0.0.1:${PORT}`;
@@ -217,6 +218,59 @@ async function nudgeThor(recordId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// auth: verify the Auth.js session cookie independently of the web app.
+// The cookie is a JWE keyed by the shared AUTH_SECRET; after decoding we
+// still check users.active so suspension bites despite stateless tokens.
+// ---------------------------------------------------------------------------
+const AUTH_SECRET = process.env.AUTH_SECRET || null;
+const SESSION_COOKIES = ["__Secure-authjs.session-token", "authjs.session-token"];
+
+function readCookies(req) {
+  const out = {};
+  for (const part of (req.headers.cookie || "").split(";")) {
+    const i = part.indexOf("=");
+    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+  }
+  return out;
+}
+
+async function requireUser(req, res, next) {
+  try {
+    if (!AUTH_SECRET) {
+      return res.status(500).json({ detail: "auth is not configured" });
+    }
+    const cookies = readCookies(req);
+    let token = null;
+    for (const name of SESSION_COOKIES) {
+      if (!cookies[name]) continue;
+      token = await decode({ token: decodeURIComponent(cookies[name]),
+                             secret: AUTH_SECRET, salt: name }).catch(() => null);
+      if (token) break;
+    }
+    if (!token?.uid) {
+      return res.status(401).json({ detail: "sign in required" });
+    }
+    const { rows } = await pool.query(
+      "select id, active from users where id = $1 and deleted_at is null",
+      [token.uid]);
+    if (!rows.length || !rows[0].active) {
+      return res.status(401).json({ detail: "account unavailable" });
+    }
+    req.user = { id: rows[0].id };
+    next();
+  } catch (e) {
+    console.error("[heimdall] auth error:", e.message);
+    res.status(401).json({ detail: "sign in required" });
+  }
+}
+
+async function recordOwner(recordId) {
+  const { rows } = await pool.query(
+    "select user_id from records where id = $1", [recordId]);
+  return rows.length ? rows[0].user_id : null;
+}
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitForSeal(recordId, res) {
@@ -234,7 +288,7 @@ async function waitForSeal(recordId, res) {
 // ---------------------------------------------------------------------------
 // NEW flow: draft + presigned uploads + seal
 // ---------------------------------------------------------------------------
-app.post("/records/draft", express.json(), async (req, res) => {
+app.post("/records/draft", requireUser, express.json(), async (req, res) => {
   try {
     const artist = (req.body.artist || "").trim();
     const files = req.body.files || [];
@@ -247,7 +301,7 @@ app.post("/records/draft", express.json(), async (req, res) => {
         { detail: "need exactly one MASTER, one PROJECT, and two or more STEMs" });
     }
 
-    const userId = await pocUserId();
+    const userId = req.user.id;
     const recordId = crypto.randomUUID();
     let stemPos = 0;
     const assets = files.map((f) => {
@@ -298,10 +352,13 @@ app.put("/uploads/local/*", (req, res) => {
   }
 });
 
-app.post("/records/:id/seal", express.json(), async (req, res) => {
+app.post("/records/:id/seal", requireUser, express.json(), async (req, res) => {
   try {
     const recordId = req.params.id;
-    const userId = await pocUserId();
+    const userId = req.user.id;
+    if (await recordOwner(recordId) !== userId) {
+      return res.status(404).json({ detail: "no such draft" });
+    }
     const inputs = await inputAssetsForRecord(recordId);
     if (!inputs.length) return res.status(404).json({ detail: "no such draft" });
 
@@ -391,10 +448,12 @@ async function stageAsset(userId, recordId, kind, position, srcPath, filename,
   const key = `${userId}/${recordId}/${assetId}${ext}`;
   if (s3) {
     const { Upload } = require("@aws-sdk/lib-storage");
-    await s3.send(new PutObjectCommand({
-      Bucket: ASSETS_BUCKET, Key: key, Body: fs.createReadStream(srcPath),
-      ContentType: contentType,
-    }));
+    await new Upload({
+      client: s3,
+      params: { Bucket: ASSETS_BUCKET, Key: key,
+                Body: fs.createReadStream(srcPath),
+                ContentType: contentType },
+    }).done();
     fs.rmSync(srcPath, { force: true });
   } else {
     putLocalAssetFromFile(srcPath, key);
@@ -408,7 +467,7 @@ async function stageAsset(userId, recordId, kind, position, srcPath, filename,
   return key;
 }
 
-app.post("/product/register", registerFields, async (req, res) => {
+app.post("/product/register", requireUser, registerFields, async (req, res) => {
   const cleanup = () => {
     if (req.stagingDir) fs.rmSync(req.stagingDir, { recursive: true, force: true });
   };
@@ -439,7 +498,7 @@ app.post("/product/register", registerFields, async (req, res) => {
         { detail: "provide the .logicx as a zip or as folder files+paths" });
     }
 
-    const userId = await pocUserId();
+    const userId = req.user.id;
     const recordId = crypto.randomUUID();
     const masterName = path.basename(master.originalname || "master.wav");
 
@@ -479,9 +538,12 @@ app.post("/product/register", registerFields, async (req, res) => {
 // ---------------------------------------------------------------------------
 // status, release, manifests
 // ---------------------------------------------------------------------------
-app.get("/records/:id", async (req, res) => {
+app.get("/records/:id", requireUser, async (req, res) => {
   let job;
   try {
+    if (await recordOwner(req.params.id) !== req.user.id) {
+      return res.status(404).json({ detail: "no such record" });
+    }
     job = await jobForRecord(req.params.id);
   } catch {
     return res.status(422).json({ detail: "bad record id" });
@@ -491,8 +553,11 @@ app.get("/records/:id", async (req, res) => {
              error: job.error, result: job.result });
 });
 
-app.get("/records/:id/release", async (req, res) => {
+app.get("/records/:id/release", requireUser, async (req, res) => {
   try {
+    if (await recordOwner(req.params.id) !== req.user.id) {
+      return res.status(404).json({ detail: "no such record" });
+    }
     const asset = await releaseAssetForRecord(req.params.id);
     if (asset) {
       const filename = asset.original_filename ||
