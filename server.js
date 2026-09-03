@@ -55,7 +55,10 @@ const app = express();
 // ---------------------------------------------------------------------------
 // CORS
 // ---------------------------------------------------------------------------
-const ORIGINS = new Set(["http://localhost:3000", "http://127.0.0.1:3000"]);
+const ORIGINS = new Set([
+  "http://localhost:3000", "http://127.0.0.1:3000",   // Astro site (harmless; makes no API calls)
+  "http://localhost:3001", "http://127.0.0.1:3001",   // Next app — the real caller
+]);
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && ORIGINS.has(origin)) {
