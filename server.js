@@ -131,14 +131,14 @@ async function pocUserId() {
   return pocUserIdCache;
 }
 
-async function createDraftWithAssets(recordId, artist, userId, assets) {
+async function createDraftWithAssets(recordId, artist, title, userId, assets) {
   const client = await pool.connect();
   try {
     await client.query("begin");
     await client.query(
-      `insert into records (id, user_id, artist_name, status, watermark_payload)
-       values ($1, $2, $3, 'DRAFT', $4)`,
-      [recordId, userId, artist, recordId.replaceAll("-", "")]);
+      `insert into records (id, user_id, artist_name, title, status, watermark_payload)
+       values ($1, $2, $3, $4, 'DRAFT', $5)`,
+      [recordId, userId, artist, title || null, recordId.replaceAll("-", "")]);
     for (const a of assets) {
       await client.query(
         `insert into assets (id, owner_user_id, record_id, kind, position,
@@ -294,6 +294,7 @@ async function waitForSeal(recordId, res) {
 app.post("/records/draft", requireUser, express.json(), async (req, res) => {
   try {
     const artist = (req.body.artist || "").trim();
+    const title = (req.body.title || "").trim().slice(0, 200);
     const files = req.body.files || [];
     if (!artist) return res.status(422).json({ detail: "artist is required" });
     const kinds = files.map((f) => f.kind);
@@ -322,7 +323,7 @@ app.post("/records/draft", requireUser, express.json(), async (req, res) => {
       };
     });
 
-    await createDraftWithAssets(recordId, artist, userId, assets);
+    await createDraftWithAssets(recordId, artist, title, userId, assets);
     const uploads = [];
     for (const a of assets) {
       uploads.push({
@@ -541,6 +542,51 @@ app.post("/product/register", requireUser, registerFields, async (req, res) => {
 // ---------------------------------------------------------------------------
 // status, release, manifests
 // ---------------------------------------------------------------------------
+
+// The musician's catalog: every record they own, newest first, with the
+// dashboard summary fields and how many times each has been verified.
+app.get("/records", requireUser, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `select r.id, r.title, r.artist_name, r.status,
+              r.created_at, r.sealed_at,
+              r.coherence_verified, r.coherence_confidence,
+              r.sameorigin_score, r.sameorigin_band,
+              r.watermark_selfcheck, r.manifest_public_url,
+              (select count(*)::int from verifications v
+                where v.matched_record_id = r.id and v.linked) as times_verified
+         from records r
+        where r.user_id = $1 and r.deleted_at is null
+        order by r.created_at desc
+        limit 200`,
+      [req.user.id]);
+    res.json({ records: rows });
+  } catch (e) {
+    res.status(500).json({ detail: e.message });
+  }
+});
+
+// Verification history for one record (owner only). Sanitized: when and
+// how copies linked back — never requester IPs or user agents.
+app.get("/records/:id/verifications", requireUser, async (req, res) => {
+  try {
+    if (await recordOwner(req.params.id) !== req.user.id) {
+      return res.status(404).json({ detail: "no such record" });
+    }
+    const { rows } = await pool.query(
+      `select created_at, linked_via, copy_attack_suspected
+         from verifications
+        where matched_record_id = $1 and linked
+        order by created_at desc
+        limit 50`,
+      [req.params.id]);
+    res.json({ record_id: req.params.id, count: rows.length,
+               verifications: rows });
+  } catch {
+    res.status(422).json({ detail: "bad record id" });
+  }
+});
+
 app.get("/records/:id", requireUser, async (req, res) => {
   let job;
   try {
@@ -552,8 +598,20 @@ app.get("/records/:id", requireUser, async (req, res) => {
     return res.status(422).json({ detail: "bad record id" });
   }
   if (!job) return res.status(404).json({ detail: "no such record" });
+  // Additive: the record row itself, so the dashboard's detail page has
+  // titles/badges without a second endpoint. Existing callers unaffected.
+  let record = null;
+  try {
+    const { rows } = await pool.query(
+      `select id, title, artist_name, status, created_at, sealed_at,
+              coherence_verified, coherence_confidence, sameorigin_score,
+              sameorigin_band, watermark_selfcheck, manifest_public_url,
+              cert_subject, signer_self_attested
+         from records where id = $1`, [req.params.id]);
+    record = rows[0] || null;
+  } catch { /* keep legacy shape on any failure */ }
   res.json({ record_id: req.params.id, status: job.status,
-             error: job.error, result: job.result });
+             error: job.error, result: job.result, record });
 });
 
 app.get("/records/:id/release", requireUser, async (req, res) => {
