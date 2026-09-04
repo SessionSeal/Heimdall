@@ -588,30 +588,35 @@ app.get("/records/:id/verifications", requireUser, async (req, res) => {
 });
 
 app.get("/records/:id", requireUser, async (req, res) => {
-  let job;
-  try {
-    if (await recordOwner(req.params.id) !== req.user.id) {
-      return res.status(404).json({ detail: "no such record" });
-    }
-    job = await jobForRecord(req.params.id);
-  } catch {
-    return res.status(422).json({ detail: "bad record id" });
-  }
-  if (!job) return res.status(404).json({ detail: "no such record" });
-  // Additive: the record row itself, so the dashboard's detail page has
-  // titles/badges without a second endpoint. Existing callers unaffected.
-  let record = null;
+  // The record row is the authority for ownership and existence; the job
+  // is optional (a DRAFT whose upload never finished has no job yet — it
+  // should still render its own page, not 404).
+  let record;
   try {
     const { rows } = await pool.query(
-      `select id, title, artist_name, status, created_at, sealed_at,
+      `select id, user_id, title, artist_name, status, created_at, sealed_at,
               coherence_verified, coherence_confidence, sameorigin_score,
               sameorigin_band, watermark_selfcheck, manifest_public_url,
               cert_subject, signer_self_attested
-         from records where id = $1`, [req.params.id]);
+         from records where id = $1 and deleted_at is null`, [req.params.id]);
     record = rows[0] || null;
-  } catch { /* keep legacy shape on any failure */ }
-  res.json({ record_id: req.params.id, status: job.status,
-             error: job.error, result: job.result, record });
+  } catch {
+    return res.status(422).json({ detail: "bad record id" });
+  }
+  if (!record || record.user_id !== req.user.id) {
+    return res.status(404).json({ detail: "no such record" });
+  }
+  delete record.user_id;
+  const job = await jobForRecord(req.params.id).catch(() => null);
+  // status prefers the record row (DRAFT/SEALED/FAILED); the job's status
+  // is a finer-grained view of the seal pipeline when one exists.
+  res.json({
+    record_id: req.params.id,
+    status: job ? job.status : record.status,
+    error: job ? job.error : null,
+    result: job ? job.result : null,
+    record,
+  });
 });
 
 app.get("/records/:id/release", requireUser, async (req, res) => {
