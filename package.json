@@ -2,7 +2,7 @@
   "name": "sessionseal-heimdall",
   "version": "0.1.0",
   "private": true,
-  "description": "SessionSeal gateway: register intake, job status, release downloads, Odin proxy",
+  "description": "SessionSeal gateway: draft/presign, seal orchestration, record reads, Odin proxy",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -11,13 +11,10 @@
     "@auth/core": "^0.41.3",
     "@aws-sdk/client-s3": "^3.1124.0",
     "@aws-sdk/client-sqs": "^3.600.0",
-    "@aws-sdk/lib-storage": "^3.1124.0",
     "@aws-sdk/s3-request-presigner": "^3.1124.0",
-    "archiver": "^7.0.0",
     "dotenv": "^16.4.0",
     "express": "^4.19.0",
     "http-proxy": "^1.18.1",
-    "multer": "^1.4.5-lts.1",
     "pg": "^8.12.0"
   }
 }
