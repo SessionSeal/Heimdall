@@ -16,6 +16,7 @@ const express = require("express");
 const { PORT, ODIN_URL, SQS_URL, ASSETS_BUCKET, CORS_ORIGINS } = require("./config");
 const recordRoutes = require("./routes/records");
 const sealRoutes = require("./routes/seal");
+const shareRoutes = require("./routes/shares");
 const { proxyToOdin } = require("./routes/proxy");
 
 const app = express();
@@ -35,6 +36,7 @@ app.use((req, res, next) => {
 // --- routes Heimdall owns --------------------------------------------------
 app.use(recordRoutes);
 app.use(sealRoutes);
+app.use(shareRoutes);
 
 // --- everything else -> Odin (must be last) --------------------------------
 app.use(proxyToOdin);

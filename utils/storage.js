@@ -32,13 +32,14 @@ async function presignPut(key, contentType) {
   return `${PUBLIC_URL}/uploads/local/${key.split("/").map(encodeURIComponent).join("/")}`;
 }
 
-/** Presigned GET (1h) with a download filename; null in local mode. */
-async function presignGet(key, filename) {
+/** Presigned GET with a download filename; null in local mode. TTL in seconds
+ *  (default 1h). Share routes pass a short TTL so a revoked grant bites fast. */
+async function presignGet(key, filename, expiresIn = 3600) {
   if (s3) {
     return getSignedUrl(s3, new GetObjectCommand({
       Bucket: ASSETS_BUCKET, Key: key,
       ResponseContentDisposition: `attachment; filename="${filename}"`,
-    }), { expiresIn: 3600 });
+    }), { expiresIn });
   }
   return null; // local mode streams the file directly
 }

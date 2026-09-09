@@ -132,8 +132,116 @@ async function verificationsForRecord(recordId) {
   return rows;
 }
 
+// --- dispute shares --------------------------------------------------------
+
+/** Full record row for building the reviewer report (includes same-origin
+ *  report jsonb and the manifest/coherence fields). */
+async function reportSource(recordId) {
+  const { rows } = await query(
+    `select id, title, artist_name, status, sealed_at,
+            coherence_verified, coherence_confidence,
+            sameorigin_score, sameorigin_band, sameorigin_report,
+            manifest_public_url, cert_subject, signer_self_attested
+       from records where id = $1 and deleted_at is null`, [recordId]);
+  return rows[0] || null;
+}
+
+/** Stem + session assets available to preview/download for a record. */
+async function shareableAssets(recordId) {
+  const { rows } = await query(
+    `select id, kind, position, s3_key, original_filename, content_type
+       from assets
+      where record_id = $1 and kind in ('STEM', 'PROJECT')
+        and deleted_at is null
+      order by kind, position`, [recordId]);
+  return rows;
+}
+
+async function createShare(recordId, userId, token, tiers, expiresAt, label) {
+  const { rows } = await query(
+    `insert into record_shares (record_id, created_by, token, tiers, expires_at, label)
+     values ($1, $2, $3, $4, $5, $6) returning id, token`,
+    [recordId, userId, token, tiers, expiresAt, label || null]);
+  return rows[0];
+}
+
+/** All shares for a record, with their recent access log rolled up. */
+async function sharesForRecord(recordId) {
+  const { rows } = await query(
+    `select s.id, s.token, s.tiers, s.status, s.expires_at, s.label, s.created_at,
+            coalesce((
+              select json_agg(json_build_object(
+                'tier', a.tier, 'action', a.action,
+                'reviewer_email', a.reviewer_email,
+                'created_at', a.created_at) order by a.created_at desc)
+              from share_accesses a where a.share_id = s.id), '[]') as accesses
+       from record_shares s
+      where s.record_id = $1
+      order by s.created_at desc`, [recordId]);
+  return rows;
+}
+
+/** Update tiers / expiry / label of a share the caller owns. */
+async function updateShare(shareId, userId, { tiers, expiresAt, label }) {
+  const { rows } = await query(
+    `update record_shares s
+        set tiers = coalesce($3, s.tiers),
+            expires_at = case when $4::boolean then $5 else s.expires_at end,
+            label = coalesce($6, s.label),
+            updated_at = now()
+       from records r
+      where s.id = $1 and s.record_id = r.id and r.user_id = $2
+      returning s.id`,
+    [shareId, userId, tiers ?? null, expiresAt !== undefined,
+     expiresAt ?? null, label ?? null]);
+  return rows.length > 0;
+}
+
+async function revokeShare(shareId, userId) {
+  const { rows } = await query(
+    `update record_shares s set status = 'REVOKED', updated_at = now()
+       from records r
+      where s.id = $1 and s.record_id = r.id and r.user_id = $2
+      returning s.id`, [shareId, userId]);
+  return rows.length > 0;
+}
+
+/** Look up a share by its public token. Returns the row incl. record_id +
+ *  a computed `active` (ACTIVE and not expired). The reviewer path calls this
+ *  on every mount and every mint — DB is the source of truth. */
+async function shareByToken(token) {
+  const { rows } = await query(
+    `select id, record_id, tiers, status, expires_at,
+            (status = 'ACTIVE' and (expires_at is null or expires_at > now())) as active
+       from record_shares where token = $1`, [token]);
+  return rows[0] || null;
+}
+
+async function logShareAccess({ shareId, tier, action, reviewerEmail,
+                                assetId, ip, userAgent }) {
+  await query(
+    `insert into share_accesses
+       (share_id, tier, action, reviewer_email, asset_id, ip, user_agent)
+     values ($1, $2, $3, $4, $5, $6, $7)`,
+    [shareId, tier, action, reviewerEmail || null, assetId || null,
+     ip || null, userAgent || null]);
+}
+
+/** One shareable asset by id, scoped to the record (prevents cross-record ids). */
+async function shareableAssetById(recordId, assetId) {
+  const { rows } = await query(
+    `select id, kind, s3_key, original_filename, content_type
+       from assets
+      where id = $1 and record_id = $2 and kind in ('STEM','PROJECT')
+        and deleted_at is null`, [assetId, recordId]);
+  return rows[0] || null;
+}
+
 module.exports = {
   ownerOf, createDraftWithAssets, inputAssets, setAssetSize, artistNameOf,
   queueSeal, latestSealJob, releaseAsset, listForUser, detailById,
   verificationsForRecord,
+  // shares
+  reportSource, shareableAssets, createShare, sharesForRecord, updateShare,
+  revokeShare, shareByToken, logShareAccess, shareableAssetById,
 };
