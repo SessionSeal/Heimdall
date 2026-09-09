@@ -1,12 +1,12 @@
 /**
  * The translation layer: turns SessionSeal's technical same-origin findings
  * into a plain-language verification report a distributor's reviewer can act
- * on — WITHOUT assuming they know audio/crypto. Every line explains, in their
+ * on, WITHOUT assuming they know audio/crypto. Every line explains, in their
  * words, what the finding means for the "is this AI?" question.
  *
  * Honest by construction: the verdict follows the band (STRONG/MODERATE/WEAK),
  * never always "strong"; only checks that actually evaluated are shown as
- * evidence; nothing here claims a human made the music — it evidences REAL
+ * evidence; nothing here claims a human made the music. It evidences REAL
  * STUDIO WORK, which an AI export cannot produce.
  */
 
@@ -16,8 +16,8 @@ const CHECK_COPY = {
   "A1": {
     title: "The stems rebuild the finished track",
     matched: "The separate instrument/vocal tracks, mixed together, reproduce this exact song.",
-    meaning: "An AI-generated track is a single exported file — it has no separate stems that mix down to it. Having them is a hallmark of real production.",
-    tip: "Stems are the individual layers of a song (drums, bass, vocals…). We checked they actually combine into the released master.",
+    meaning: "An AI-generated track is a single exported file with no separate stems that mix down to it. Having them is a hallmark of real production.",
+    tip: "Stems are the individual layers of a song (drums, bass, vocals, and so on). We checked they actually combine into the released master.",
   },
   "A2": {
     title: "Recorded takes are found inside the stems",
@@ -28,7 +28,7 @@ const CHECK_COPY = {
   "A3": {
     title: "The stems are explained by the session",
     matched: "The stems can be traced back to recordings in the project session.",
-    meaning: "The stems didn't appear from nowhere — they come from a real, inspectable session.",
+    meaning: "The stems didn't appear from nowhere. They come from a real, inspectable session.",
     tip: "The reverse of the previous check: each stem contains material from the session's recordings.",
   },
   "A4": {
@@ -39,9 +39,9 @@ const CHECK_COPY = {
   },
   "B1": {
     title: "The session holds more than the release",
-    matched: "The project contains extra material that isn't in the released song — unused takes and alternates.",
+    matched: "The project contains extra material that isn't in the released song, such as unused takes and alternates.",
     meaning: "Real sessions are messy and contain leftovers. An AI export contains only itself, nothing extra.",
-    tip: "Producers keep far more in a session than what ships — alternate takes, scrapped ideas. We detected such extra material.",
+    tip: "Producers keep far more in a session than what ships, like alternate takes and scrapped ideas. We detected such extra material.",
   },
   "B2": {
     title: "Edit history is present",
@@ -59,7 +59,7 @@ const CHECK_COPY = {
     title: "Technical settings are consistent",
     matched: "The project's audio settings match a normal studio recording.",
     meaning: "The session's technical fingerprint is consistent with real recording equipment.",
-    tip: "Things like sample rate — we checked they're what a real recording session would use.",
+    tip: "Things like sample rate. We checked they're what a real recording session would use.",
   },
   "C3": {
     title: "Session length matches the track",
@@ -70,7 +70,7 @@ const CHECK_COPY = {
   "C4": {
     title: "Declared files are present",
     matched: "The files the project references are actually present in it.",
-    meaning: "The session is internally consistent — it isn't a shell pointing at missing pieces.",
+    meaning: "The session is internally consistent. It isn't a shell pointing at missing pieces.",
     tip: "A project file lists the audio it uses; we confirmed those files are really there.",
   },
 };
@@ -78,7 +78,7 @@ const CHECK_COPY = {
 const BAND_VERDICT = {
   STRONG: {
     headline: "Strong evidence of real studio production",
-    summary: "This track was sealed with SessionSeal along with its project session and individual stems, and multiple independent signals point to genuine human studio work — the kind of evidence an AI-generated export cannot produce.",
+    summary: "This track was sealed with SessionSeal along with its project session and individual stems, and multiple independent signals point to genuine human studio work, the kind of evidence an AI-generated export cannot produce.",
   },
   MODERATE: {
     headline: "Moderate evidence of real studio production",
